@@ -1,52 +1,233 @@
-Can Prior Search Signals Predict Next-Month Page Decline?
-FlyRank ML Internship Capstone — Lane 2: Refresh / Content Opportunity Scoring
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Can Prior Search Signals Predict Page Decline? — FlyRank ML Internship Capstone</title>
+<style>
+  :root {
+    --ink: #1a2228;
+    --muted: #5a6872;
+    --accent: #426b69;
+    --accent2: #8c6bb1;
+    --line: #e1e6e9;
+    --bg-card: #f7f8f9;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    line-height: 1.65;
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 48px 20px 100px;
+    background: #ffffff;
+  }
+  h1 { font-size: 1.9rem; line-height: 1.3; margin-bottom: 0.3em; }
+  h2 {
+    font-size: 1.3rem;
+    margin-top: 2.6em;
+    padding-bottom: 0.3em;
+    border-bottom: 2px solid var(--line);
+  }
+  h3 { font-size: 1.05rem; margin-top: 1.6em; color: var(--accent); }
+  p { margin: 0.9em 0; }
+  .byline { color: var(--muted); font-size: 0.95rem; margin-bottom: 2em; }
+  .abstract {
+    background: var(--bg-card);
+    border-left: 4px solid var(--accent);
+    padding: 1.2em 1.4em;
+    border-radius: 4px;
+    font-size: 0.98rem;
+  }
+  .callout {
+    background: #fdf6e8;
+    border-left: 4px solid #c9962a;
+    padding: 1em 1.3em;
+    border-radius: 4px;
+    margin: 1.2em 0;
+    font-size: 0.95rem;
+  }
+  table { border-collapse: collapse; width: 100%; margin: 1.2em 0; font-size: 0.92rem; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+  th { background: var(--bg-card); font-weight: 600; }
+  code {
+    background: var(--bg-card);
+    padding: 0.15em 0.4em;
+    border-radius: 3px;
+    font-size: 0.88em;
+  }
+  ul, ol { padding-left: 1.4em; }
+  li { margin: 0.4em 0; }
+  .chart-wrap { margin: 1.6em 0; text-align: center; }
+  .chart-caption { font-size: 0.85rem; color: var(--muted); margin-top: 0.6em; }
+  footer {
+    margin-top: 4em;
+    padding-top: 1.5em;
+    border-top: 1px solid var(--line);
+    font-size: 0.9rem;
+    color: var(--muted);
+  }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
 
-Abstract. This project asks whether observable search and engagement signals from a prior 90-day window can predict whether a content page will decline in search visibility the following month, to support a content reviewer's prioritization queue. Using the FlyRank internship warehouse (Hugging Face, gated release), a client-grouped Random Forest was trained and leakage-audited. The headline finding is methodological rather than predictive: an unordered SQL aggregation made the train/test split silently non-deterministic, causing reported performance to swing from AUC 0.68 down to AUC 0.50 across otherwise-identical reruns. After fixing this reproducibility bug, the honest, stable result shows the model performs no better than random guessing (ROC AUC 0.504) on this label and feature set. This page reports that negative result directly, diagnoses a likely cause, and lays out a validated, reusable pipeline for future iteration.
-1. Introduction
-FlyRank's product already flags pages for review using hand-tuned rules (a health score, staleness flags). The decision this project supports is: out of thousands of content pages, which should a human reviewer check first for possible refresh? A wrong call here costs either wasted reviewer time (false positive) or a declining page going unnoticed for another review cycle (false negative) — which is why this is framed as a ranking problem, evaluated with Precision@K, not a plain accuracy task.
+<h1>Can Prior Search Signals Predict Next-Month Page Decline?</h1>
+<p class="byline">FlyRank ML Internship Capstone — Lane 2: Refresh / Content Opportunity Scoring</p>
 
-2. Data
-Source: FlyRank/internship-warehouse on Hugging Face, fact_content_daily_performance table, months January–April 2026. Feature window: January–March 2026 (the "prior 90 days"). Label window: April 2026 (the "next 30 days"), held out and never used as a feature. Rows were required to have at least 50 March impressions, to avoid building a ratio-based label on noise. No client names, domains, URLs, or raw queries appear anywhere in this project — only pseudonymous content_hash_id / client_hash_id values, used strictly for grouping and joins.
+<div class="abstract">
+<strong>Abstract.</strong> This project asks whether observable search and engagement
+signals from a prior 90-day window can predict whether a content page will decline
+in search visibility the following month, to support a content reviewer's prioritization
+queue. Using the FlyRank internship warehouse (Hugging Face, gated release), a
+client-grouped Random Forest was trained and leakage-audited. The headline finding is
+methodological rather than predictive: an unordered SQL aggregation made the train/test
+split silently non-deterministic, causing reported performance to swing from AUC 0.68
+down to AUC 0.50 across otherwise-identical reruns. After fixing this reproducibility
+bug, the honest, stable result shows the model performs no better than random guessing
+(ROC AUC 0.504) on this label and feature set. This page reports that negative result
+directly, diagnoses a likely cause, and lays out a validated, reusable pipeline for
+future iteration.
+</div>
 
-3. Methodology
-Label: a page is "declining" if impressions_april < 0.8 × impressions_march.
+<h2>1. Introduction</h2>
+<p>
+FlyRank's product already flags pages for review using hand-tuned rules (a health
+score, staleness flags). The decision this project supports is: <em>out of thousands
+of content pages, which should a human reviewer check first for possible refresh?</em>
+A wrong call here costs either wasted reviewer time (false positive) or a declining
+page going unnoticed for another review cycle (false negative) — which is why this
+is framed as a ranking problem, evaluated with Precision@K, not a plain accuracy task.
+</p>
 
-Features: log-transformed Jan–Mar totals for impressions, clicks, sessions, and scroll events; average search position with a missing-data flag. One candidate feature, log_impressions_march, was deliberately tested and excluded after a leakage audit — it sits inside the label's own denominator, so it was trained with and without it to check for a shortcut. Removing it changed AUC by only 0.02 (0.574 → 0.553), the signature of a feature carrying little real information, not a leak (a true leak collapses AUC toward 0.5 when removed, or towards 1.0 when it is the sole driver — neither happened here).
+<h2>2. Data</h2>
+<p>
+Source: <code>FlyRank/internship-warehouse</code> on Hugging Face,
+<code>fact_content_daily_performance</code> table, months January–April 2026.
+Feature window: January–March 2026 (the "prior 90 days"). Label window: April 2026
+(the "next 30 days"), held out and never used as a feature. Rows were required to
+have at least 50 March impressions, to avoid building a ratio-based label on noise.
+No client names, domains, URLs, or raw queries appear anywhere in this project —
+only pseudonymous <code>content_hash_id</code> / <code>client_hash_id</code> values,
+used strictly for grouping and joins.
+</p>
 
-Split: client-grouped 80/20 (no client's pages appear in both train and test), because a random row split was shown to inflate ROC AUC from 0.57 to 0.68 — evidence the model was partly memorizing client-specific patterns rather than learning a transferable decline signal.
+<h2>3. Methodology</h2>
+<p>
+<strong>Label:</strong> a page is "declining" if
+<code>impressions_april &lt; 0.8 × impressions_march</code>.
+</p>
+<p>
+<strong>Features:</strong> log-transformed Jan–Mar totals for impressions, clicks,
+sessions, and scroll events; average search position with a missing-data flag.
+One candidate feature, <code>log_impressions_march</code>, was deliberately tested
+and excluded after a leakage audit — it sits inside the label's own denominator, so
+it was trained with and without it to check for a shortcut. Removing it changed AUC
+by only 0.02 (0.574 → 0.553), the signature of a feature carrying little real
+information, not a leak (a true leak collapses AUC toward 0.5 when removed, or
+towards 1.0 when it is the sole driver — neither happened here).
+</p>
+<p>
+<strong>Split:</strong> client-grouped 80/20 (no client's pages appear in both
+train and test), because a random row split was shown to inflate ROC AUC from 0.57
+to 0.68 — evidence the model was partly memorizing client-specific patterns rather
+than learning a transferable decline signal.
+</p>
+<p>
+<strong>Model:</strong> Random Forest (200 trees, max depth 10), compared against
+a transparent staleness-based rule baseline from an earlier stage of this project.
+</p>
 
-Model: Random Forest (200 trees, max depth 10), compared against a transparent staleness-based rule baseline from an earlier stage of this project.
+<h2>4. Results</h2>
 
-4. Results
-ROC AUC across identical reruns (before the reproducibility fix)
-0.0
-0.5
-1.0
-random chance
-0.681
-Run 1 (w05)
-0.574
-Run 2 (w06)
-0.504
-Run 3 (fixed, stable)
-Same code, same random seed, same label — three runs gave three different AUCs because an unordered SQL GROUP BY silently changed which 9 clients landed in the test set each time. The teal bar (Run 3) is the reproducible result after adding an explicit sort before the split.
+<div class="chart-wrap">
+<svg viewBox="0 0 640 300" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:640px;">
+  <rect width="640" height="300" fill="#ffffff"/>
+  <text x="320" y="26" text-anchor="middle" font-family="Arial" font-size="16" fill="#1a2228" font-weight="bold">ROC AUC across identical reruns (before the reproducibility fix)</text>
 
-Model	ROC AUC	Precision@50	Base rate
-Random Forest (final, reproducible)	0.504	0.50	0.518
-Staleness rule baseline (Week 4)	~0.55	varied, 0.55–0.86*	0.534
-*The baseline's own precision was also evaluated across the same unstable splits; see Limitations.
+  <!-- axis -->
+  <line x1="90" y1="250" x2="580" y2="250" stroke="#5a6872" stroke-width="1"/>
+  <line x1="90" y1="60" x2="90" y2="250" stroke="#5a6872" stroke-width="1"/>
+  <text x="80" y="255" text-anchor="end" font-family="Arial" font-size="11" fill="#5a6872">0.0</text>
+  <text x="80" y="160" text-anchor="end" font-family="Arial" font-size="11" fill="#5a6872">0.5</text>
+  <text x="80" y="66" text-anchor="end" font-family="Arial" font-size="11" fill="#5a6872">1.0</text>
+  <line x1="90" y1="160" x2="580" y2="160" stroke="#c9c9c9" stroke-width="1" stroke-dasharray="4,4"/>
+  <text x="585" y="164" font-family="Arial" font-size="10" fill="#8c8c8c">random chance</text>
 
-The Random Forest does not outperform random guessing on the honest, reproducible split. Among the top-50 ranked pages, 5–6 of 9 held-out clients are represented — ruling out the earlier concern that the queue was dominated by a single client — but the ranking itself carries no real predictive signal once the split instability is removed.
+  <!-- bars: run1=0.68, run2=0.573, run3(final,fixed)=0.504 -->
+  <rect x="140" y="88.8" width="80" height="161.2" fill="#8c6bb1" rx="3"/>
+  <text x="180" y="80" text-anchor="middle" font-family="Arial" font-size="13" fill="#1a2228" font-weight="bold">0.681</text>
+  <text x="180" y="270" text-anchor="middle" font-family="Arial" font-size="11" fill="#5a6872">Run 1 (w05)</text>
 
-5. Limitations & Honest Framing
-This is an observed, single-split result on one feature/label definition — it does not prove the underlying task is unsolvable, only that this specific attempt did not find signal.
-The test set spans only 9 clients, which makes any top-K metric sensitive to exactly which clients land in the holdout — demonstrated empirically by the AUC swings above.
-Features captured only period totals (Jan–Mar sums), not trend direction within the window. A page with flat traffic and a page with sharply declining traffic can have the same total — this is a likely explanation for the weak signal, and an untested next step due to time constraints.
-No causal claims are made. This project does not claim to predict Google's algorithm or that refreshing a page causes recovery.
-6. Ranked Recommendations
-Given the model shows no validated skill, the actionable recommendation is to continue using the Week-4 staleness rule (transparent, debuggable, though itself weak) for reviewer prioritization, rather than this model's output. This project's contribution is a validated, reusable pipeline — feature construction, leakage audit, grouped-split evaluation — plus a documented, honest negative result and a concrete next step (month-over-month trend features) for future iteration.
+  <rect x="290" y="135.4" width="80" height="114.6" fill="#8c6bb1" rx="3"/>
+  <text x="330" y="127" text-anchor="middle" font-family="Arial" font-size="13" fill="#1a2228" font-weight="bold">0.574</text>
+  <text x="330" y="270" text-anchor="middle" font-family="Arial" font-size="11" fill="#5a6872">Run 2 (w06)</text>
 
-7. Reproducibility
-Full notebooks, code, and outputs: github.com/yashizhenya755-dev/flyrank-ml-internship — see work/notebooks/w05_model.ipynb through w07_action_playbook.ipynb and work/notebooks/capstone.ipynb. Random seed: 42 throughout. Exported metrics and the final ranked queue: work/outputs/action_playbook_metrics.json and work/outputs/action_playbook_queue.csv.
+  <rect x="440" y="158.6" width="80" height="91.4" fill="#426b69" rx="3"/>
+  <text x="480" y="150" text-anchor="middle" font-family="Arial" font-size="13" fill="#1a2228" font-weight="bold">0.504</text>
+  <text x="480" y="270" text-anchor="middle" font-family="Arial" font-size="11" fill="#5a6872">Run 3 (fixed, stable)</text>
+</svg>
+<p class="chart-caption">Same code, same random seed, same label — three runs gave three different
+AUCs because an unordered SQL <code>GROUP BY</code> silently changed which 9 clients landed in
+the test set each time. The teal bar (Run 3) is the reproducible result after adding an explicit
+sort before the split.</p>
+</div>
 
-Built on the FlyRank ML Internship dataset. Data provided by FlyRank.
+<table>
+<tr><th>Model</th><th>ROC AUC</th><th>Precision@50</th><th>Base rate</th></tr>
+<tr><td>Random Forest (final, reproducible)</td><td>0.504</td><td>0.50</td><td>0.518</td></tr>
+<tr><td>Staleness rule baseline (Week 4)</td><td>~0.55</td><td>varied, 0.55–0.86*</td><td>0.534</td></tr>
+</table>
+<p style="font-size:0.85rem;color:var(--muted);">*The baseline's own precision was also evaluated
+across the same unstable splits; see Limitations.</p>
+
+<p>
+The Random Forest does not outperform random guessing on the honest, reproducible split.
+Among the top-50 ranked pages, 5–6 of 9 held-out clients are represented — ruling out the
+earlier concern that the queue was dominated by a single client — but the ranking itself
+carries no real predictive signal once the split instability is removed.
+</p>
+
+<h2>5. Limitations &amp; Honest Framing</h2>
+<ul>
+<li>This is an <strong>observed</strong>, single-split result on one feature/label
+definition — it does not prove the underlying task is unsolvable, only that this
+specific attempt did not find signal.</li>
+<li>The test set spans only 9 clients, which makes any top-K metric sensitive to
+exactly which clients land in the holdout — demonstrated empirically by the AUC swings above.</li>
+<li>Features captured only <strong>period totals</strong> (Jan–Mar sums), not trend
+direction within the window. A page with flat traffic and a page with sharply
+declining traffic can have the same total — this is a likely explanation for the
+weak signal, and an untested next step due to time constraints.</li>
+<li>No causal claims are made. This project does not claim to predict Google's
+algorithm or that refreshing a page causes recovery.</li>
+</ul>
+
+<h2>6. Ranked Recommendations</h2>
+<p>
+Given the model shows no validated skill, the actionable recommendation is to continue
+using the Week-4 staleness rule (transparent, debuggable, though itself weak) for
+reviewer prioritization, rather than this model's output. This project's contribution
+is a validated, reusable pipeline — feature construction, leakage audit, grouped-split
+evaluation — plus a documented, honest negative result and a concrete next step
+(month-over-month trend features) for future iteration.
+</p>
+
+<h2>7. Reproducibility</h2>
+<p>
+Full notebooks, code, and outputs: 
+<a href="https://github.com/yashizhenya755-dev/flyrank-ml-internship">github.com/yashizhenya755-dev/flyrank-ml-internship</a>
+— see <code>work/notebooks/w05_model.ipynb</code> through <code>w07_action_playbook.ipynb</code>
+and <code>work/notebooks/capstone.ipynb</code>. Random seed: 42 throughout. Exported metrics
+and the final ranked queue: <code>work/outputs/action_playbook_metrics.json</code> and
+<code>work/outputs/action_playbook_queue.csv</code>.
+</p>
+
+<footer>
+Built on the FlyRank ML Internship dataset. Data provided by
+<a href="https://flyrank.ai">FlyRank</a>.
+</footer>
+
+</body>
+</html>
